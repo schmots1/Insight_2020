@@ -1,0 +1,525 @@
+- hosts: localhost
+  gather_facts: false
+  collections:
+    - netapp.ontap
+  vars:
+    login: &login
+      username: "{{ netapp_username }}"
+      password: "{{ netapp_password }}"
+      https: true
+      validate_certs: false
+  pre_tasks:
+###################
+#### Phase one ####
+###################
+  - name: Create cluster "{{ cluster }}"
+    na_ontap_cluster:
+      state: present
+      cluster_name: "{{ cluster }}"
+      hostname: "{{ dhcp_mgmt }}"
+      <<: *login
+    tags: cluster
+  - name: "Join Node to {{ cluster }}"
+    na_ontap_cluster:
+      state: present
+      cluster_ip_address: "{{ item }}"
+      #cluster_name: "{{ cluster }}"
+      hostname: "{{ dhcp_mgmt }}"
+      <<: *login
+    loop: "{{ node_joins }}"
+    tags: cluster
+  - name: Get Node Count
+    na_ontap_info:
+      state: info
+      gather_subset: cluster_node_info,disk_info
+      hostname: "{{ dhcp_mgmt }}"
+      <<: *login
+    register: netapp
+    tags: info, create, cluster
+  - name: reboot nodes
+    na_ontap_command:
+      command: "reboot -node {{ item }} -ignore-quorum-warnings"
+      hostname: "{{ dhcp_mgmt }}"
+      <<: *login
+    with_items: "{{ netapp.ontap_info.cluster_node_info }}"
+    tags: cluster, reboot
+  - name: wait for reboot to finish
+    wait_for:
+      host: "{{ dhcp_mgmt }}"
+      port: 443
+      delay: 20
+    tags: reboot, cluster
+  - name: Create cluster mgmt lif
+    na_ontap_interface:
+      state: present
+      interface_name: "{{ cluster }}_mgmt"
+      vserver: "{{ cluster }}"
+      address: "{{ mgmt_lif.ip }}"
+      netmask: "{{ mgmt_lif.subnet }}"
+      role: cluster-mgmt
+      home_node: "{{ mgmt_lif.home_node }}"
+      home_port: "{{ mgmt_lif.home_port }}"
+      hostname: "{{ dhcp_mgmt }}"
+      <<: *login
+    tags: lif, cluster
+  - name: Fillout Admin User
+    na_ontap_user:
+      state: present
+      name: admin
+      applications: ssh,console,http,ontapi,service-processor
+      authentication_method: password
+      role_name: admin
+      vserver: "{{ cluster }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    tags: admin, cluster
+  - name: Assign Disks
+    na_ontap_disks:
+      disk_count: "{{ disks }}"
+      node: "{{ item }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    with_items: "{{ netapp.ontap_info.cluster_node_info }}"
+    loop_control:
+      pause: 5
+    tags: disks, cluster
+  - name: Create Aggregates
+    na_ontap_aggregate:
+      state: present
+      service_state: online
+      nodes: "{{ item.0 }}"
+      name: "{{ item.0 | replace('-', '_')}}_{{ item.1 }}"
+      disk_count: 24
+      raid_size: 12
+      wait_for_online: True
+      time_out: 300
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop: "{{ netapp.ontap_info.cluster_node_info|product(aggr.names)|list }}"
+    tags: disks, cluster
+  - name: remove auto mgmt lif
+    na_ontap_interface:
+      state: absent
+      interface_name: "{{ cluster }}-01_mgmt_auto"
+      vserver: "{{ cluster }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    tags: cluster, clean
+  - name: Add system licenses
+    na_ontap_license:
+      state: present
+      license_codes: "{{ license_codes }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    tags: license, cluster
+###################
+#### Phase two ####
+###################
+  - name: Add default route
+    na_ontap_net_routes:
+      state: present
+      vserver: "{{ cluster }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      destination: "{{ gateway.destination }}"
+      gateway: "{{ gateway.ip }}"
+      metric: 30
+      <<: *login
+    when: gateway != None
+    tags: cluster, configure, gateway
+  - name: Create DNS
+    na_ontap_dns:
+      state: present
+      vserver: "{{ cluster }}"
+      domains: "{{ item.domain }}"
+      nameservers: "{{ item.nameserver }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop:
+      "{{ dns }}"
+    when: dns !=None
+    tags: cluster, configure, dns
+  - name: Create SNMP community
+    na_ontap_snmp:
+      community_name: "{{ item.community_name }}"
+      access_control: "{{ item.access_control }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop:
+      "{{ snmp }}"
+    when: snmp != None
+    tags: cluster, configure, snmp 
+  - name: Set NTP Server
+    na_ontap_ntp:
+      state: present
+      server_name: "{{ ntp.server }}"
+      version: "{{ ntp.version }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    when: ntp != None
+    tags: cluster, configure, ntp
+### This task for motd is forcing zapi and will need an update before post ONTAP 9.9
+  - name: Set MOTD and banner
+    na_ontap_login_messages:
+      vserver: "{{ cluster }}"
+      banner: "{{ motd }}"
+      motd_message: "{{ motd }}"
+      hostname: "{{ mgmt_lif.ip}}"
+      use_rest: Never
+      <<: *login
+    when: motd != None
+    tags: cluster, configure, motd
+  - name: Create User
+    na_ontap_user:
+      state: present
+      name: "{{ item.name }}"
+      applications: ssh,console,http,ontapi,service-processor
+      authentication_method: password
+      set_password: "{{ item.password }}"
+      lock_user: False
+      role_name: admin
+      vserver: "{{ cluster }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop:
+      "{{ users }}"
+    when: users != None
+    tags: cluster, configure, users
+  - name: Remove ports from Default broadcast domain
+    na_ontap_broadcast_domain_ports:
+      state: absent
+      broadcast_domain: Default
+      ports: "{{ item.0 }}:{{ item.1.port }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop: "{{ netapp.ontap_info.cluster_node_info|product(broadcast_domains)|list }}"
+    when:  item.1.name != 'skip' 
+    tags: cluster, configure, broadcast_domains
+  - name: create broadcast domain
+    na_ontap_broadcast_domain:
+      state: present
+      broadcast_domain: "{{ item.1.name }}"
+      mtu: "{{ item.1.mtu }}"
+      ipspace: "{{ item.1.ipspace }}"
+      ports: "{{ item.0 }}:{{ item.1.port }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop: "{{ netapp.ontap_info.cluster_node_info|product(broadcast_domains)|list }}"
+    when: item.1.name != 'skip'
+    tags: cluster, configure, broadcast_domains
+  - name: Create Interface Group
+    na_ontap_net_ifgrp:
+      state: present
+      distribution_function: "{{ item.1.distribution_function }}"
+      name: "{{ item.1.name }}"
+      ports: "{{ item.1.ports }}"
+      mode: "{{ item.1.mode }}"
+      node: "{{ item.0 }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop: "{{ netapp.ontap_info.cluster_node_info|product(ifgroups)|list }}"
+    when: item.1.name != 'skip'
+    tags: cluster, configure, ifgroups
+  - name: Modify IFGroup Ports MTU speed
+    na_ontap_net_port:
+      state: present
+      node: "{{ item.0 }}"
+      port: "{{ item.1.name }}"
+      mtu: "{{ item.1.mtu }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop: "{{ netapp.ontap_info.cluster_node_info|product(ifgroups)|list }}"
+    when: item.1.name != 'skip' 
+    tags: cluster, configure, ifgroups, mtu
+  - name: Create VLAN
+    na_ontap_net_vlan:
+      state: present
+      vlanid: "{{ item.id }}"
+      node: "{{ item.node }}"
+      parent_interface: "{{ item.parent }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    with_items:
+      "{{ vlans }}"
+    when: item.id != 'skip'
+    tags: cluster, configure, vlans
+  - name: Create Intercluster Lif #Be aware that node loop order might not be in numerical order and IPs might be assigned out of order
+    na_ontap_interface:
+      state: present
+      interface_name: "{{ item.0 }}_intercluster_lif"
+      home_port: "{{ item.1.port }}"
+      home_node: "{{ item.0 }}"
+      role: intercluster
+      admin_status: up
+      failover_policy: local-only
+      is_auto_revert: true
+      address: "{{ item.1.ip_base | ipmath(index) }}" # requires the python module library netaddr
+      netmask: "{{ item.1.subnet }}"
+      vserver: "{{ cluster }}"
+      hostname: "{{ mgmt_lif.ip}}"
+      <<: *login
+    loop: "{{ netapp.ontap_info.cluster_node_info|product(sm_lif)|list }}"
+    loop_control:
+      index_var: index
+    tags: cluster, configure, snapmirror
+###################
+### Phase three ###
+###################
+  - name: Create Vserver
+    na_ontap_svm:
+      state: present
+      name: "{{ item.name }}"
+      root_volume_security_style: "{{ 'ntfs' if item.protocol.lower() is search('cifs') else 'unix' }}"
+      #aggr_list: "{{ '*' if item.aggr_list is not defined else item.aggr_list }}" #Useful for setting an aggregate list if an application requires it.
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop: "{{ vservers }}"
+    when: vservers != None
+    tags: vserver
+  - name: Setup FCP
+    na_ontap_fcp:
+      state: present
+      service_state: started
+      vserver: "{{ item.name }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop: "{{ vservers }}"
+    when: 
+    - vservers != None
+    - item.protocol.lower() is search("fcp")
+    tags: vserver, fcp
+  - name: Setup iSCSI
+    na_ontap_iscsi:
+      state: present
+      service_state: started
+      vserver: "{{ item.name }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop:  "{{ vservers }}"
+    when: 
+    - vservers != None
+    - item.protocol.lower() is search("iscsi")
+    tags: vserver, iscsi
+  - name: Modify adapter
+    na_ontap_ucadapter:
+      state: present
+      adapter_name: "{{ item.adapter_name }}"
+      node_name: "{{ item.node_name }}"
+      mode: fc
+      type: target
+      hostname: "{{ mgmt_lif.ip}}"
+      <<: *login
+    loop: "{{ vservers }}"
+    when: 
+    - vservers != None
+    - item.protocol.lower() is search("fcp")
+    tags: vserver, fcp
+  - name: Create Interface
+    na_ontap_interface:
+      state: present
+      interface_name: "{{ item.0.name }}_{{ item.1.ip }}"
+      home_port: "{{ item.1.port }}"
+      home_node: "{{ item.1.node }}"
+      role: data
+      protocols: "{{ item.0.protocol }}"
+      admin_status: up
+      failover_policy: system-defined
+      firewall_policy: mgmt-nfs
+      is_auto_revert: true
+      address: "{{ item.1.ip }}"
+      netmask: "{{ item.1.subnet }}"
+      vserver: "{{ item.0.name }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop: "{{ vservers|subelements('lifs') }}"
+    when: 
+    - vservers != None
+    - item.1.ip != 'skip'
+    tags: vserver, lif
+  - name: Add default route
+    na_ontap_net_routes:
+      state: present
+      vserver: "{{ item.name }}"
+      destination: "{{ item.gateway.destination }}"
+      gateway: "{{ item.gateway.ip }}"
+      metric: 30
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    with_items:
+      "{{ vservers }}"
+    when: 
+    - vservers != None
+    - item.gateway != None
+    tags: vserver, gateway
+  - name: Create Vserver DNS
+    na_ontap_dns:
+      state: present
+      vserver: "{{ item.name }}"
+      domains: "{{ item.dns.domain }}"
+      nameservers: "{{ item.dns.nameserver }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    with_items:
+      "{{ vservers }}"
+    when: 
+    - vservers != None
+    - item.dns != None
+    tags: vserver, vserver_dns
+  - name: Create CIFS Server
+    na_ontap_cifs_server:
+      state: present
+      vserver: "{{ item.name }}"
+      domain: "{{ item.cifs.domain }}"
+      cifs_server_name: "{{ item.name }}"
+      force: "{{ 'false' if item.cifs.force is not defined else item.cifs.force }}"
+      admin_password: "{{ ad_password }}"
+      admin_user_name: "{{ ad_username }}"
+      ou: "{{ item.cifs.ou | default(omit) }}"
+      service_state: started
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop: "{{ vservers }}"
+    when: 
+    - vservers != None
+    - item.protocol.lower() is search("cifs")
+    tags: vserver, cifs
+  - name: Create NFS Server
+    na_ontap_nfs:
+      state: present
+      service_state: started
+      vserver: "{{ item.name }}"
+      nfsv3: enabled
+      nfsv4: disabled
+      nfsv41: disabled
+      tcp: enabled
+      udp: enabled
+      vstorage_state: disabled
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    with_items:
+      "{{ vservers }}"
+    when:
+    - vservers != None
+    - item.protocol.lower() is search("nfs")
+    tags: vserver, nfs
+  - name: Setup default NFS rule
+    na_ontap_export_policy_rule:
+      state: present
+      policy_name: default
+      vserver: "{{ item.name }}"
+      client_match: 0.0.0.0/0
+      ro_rule: any
+      rw_rule: none
+      protocol: any
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop: "{{ vservers }}"
+    when:
+    - vservers != None
+    - item.protocol.lower() is search("nfs")
+    tags: vserver, nfs
+#################### 
+#### Phase four ####
+####################
+  - name: Create Policy
+    na_ontap_export_policy:
+      state: present
+      name: "{{ item.name }}"
+      vserver: "{{ item.vserver }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop: "{{ exports }}"
+    when: 
+    - item.name != 'skip'
+    - item.protocol.lower() is search("nfs")
+    tags: exports, policy
+  - name: Setup rules
+    na_ontap_export_policy_rule:
+      state: present
+      policy_name: "{{ item.0.name }}"
+      vserver: "{{ item.0.vserver }}"
+      client_match: "{{ item.1.match }}"
+      ro_rule: "{{ item.1.ro }}"
+      rw_rule: "{{ item.1.rw }}"
+      super_user_security: "{{ item.1.su }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop: "{{ exports|subelements('clients') }}"
+    when:
+    - item.0.name != 'skip'
+    - item.0.protocol.lower() is search("nfs")
+    tags: exports, rule
+  - name: Create volume
+    na_ontap_volume:
+      state: present
+      name: "{{ item.name }}"
+      aggregate_name: "{{ item.aggr }}"
+      size: "{{ item.size }}"
+      size_unit: gb
+      policy: "{{ item.name if item.protocol.lower() is search ('nfs') else 'default' }}"
+      junction_path: "/{{ item.name }}"
+      space_guarantee: "none"
+      vserver: "{{ item.vserver }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop: "{{ exports }}"
+    when: item.name != 'skip'
+    tags: exports, volume
+  - name: Create Share
+    na_ontap_cifs:
+      state: present
+      share_name: "{{ item.share }}"
+      path: "/{{ item.name }}"
+      vserver: "{{ item.vserver }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop: "{{ exports }}"
+    when: 
+    - item.name != 'skip'
+    - item.share != None  
+    tags: exports, share
+  - name: Create iGroup
+    na_ontap_igroup:
+      state: present
+      name: "{{ item.0.name }}"
+      vserver: "{{ item.0.vserver }}"
+      initiator_group_type: "{{ item.0.igroup_type }}"
+      ostype: "{{ item.0.os_type }}"
+      initiator: "{{ item.1.initiator }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop: "{{ exports|subelements('initiator') }}"
+    when: 
+    - item.0.name != 'skip'
+    - item.0.protocol.lower() is search ("iscsi") or 
+      item.0.protocol.lower() is search ("fcp")
+    tags: exports, igroup
+  - name: Lun Create
+    na_ontap_lun:
+      state: present
+      name: "{{ item.name }}"
+      flexvol_name: "{{ item.vol_name }}"
+      vserver: "{{ item.vserver }}"
+      size: "{{ item.size }}"
+      size_unit: gb
+      ostype: "{{ item.ostype }}"
+      space_reserve: "{{ item.space_reserve }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop: "{{ exports }}"
+    when:
+    - item.name != 'skip'
+    - (item.protocol.lower() is search ("iscsi")) or (item.protocol.lower() is search ("fcp"))
+    tags: exports, lun
+  - name: Create LUN mapping
+    na_ontap_lun_map:
+      state: present
+      initiator_group_name: "{{ item.name }}"
+      path: "/vol/{{ item.name }}/{{ item.name }}"
+      vserver: "{{ item.vserver }}"
+      hostname: "{{ mgmt_lif.ip }}"
+      <<: *login
+    loop: "{{ exports }}"
+    when:
+    - item.name != 'skip'
+    - (item.protocol.lower() is search ("iscsi")) or (item.protocol.lower() is search ("fcp"))
+    tags: exports, mapping
