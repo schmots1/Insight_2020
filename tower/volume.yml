@@ -1,0 +1,21 @@
+- hosts: localhost
+  name: ONTAP
+  gather_facts: false
+    state: present
+  tasks:
+  - name: "{{ tower_job_template_name }}"
+    netapp.ontap.na_ontap_volume:
+      state: "{{ state }}"
+      name: "{{ volname }}"
+      aggregate_name: "{{ aggr_name }}"
+      size: "{{ size }}"
+      size_unit: gb
+      policy: "{{ export_policy }}"
+      junction_path: "/{{ volname' }}"
+      space_guarantee: "none"
+      vserver: "{{ vserver }}"
+      hostname: "{{ cluster_mgmt_lif}}"
+      username: "{{ netapp_username }}"
+      password: "{{ netapp_password }}"
+      https: true
+      validate_certs: false

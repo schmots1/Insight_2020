@@ -1,0 +1,16 @@
+---
+- netapp.um_info.na_um_list_clusters:
+    hostname: "{{ aiqum_ip }}"
+    username: "{{ aiqum_username }}"
+    password: "{{ aiqum_password }}"
+    validate_certs: false
+  register: cluster_list
+- set_stats:
+    data:
+      cluster_id: "{{ item['uuid'] }}"
+      cluster_mgmt_lif: "{{ item['management_ip'] }}"
+  with_items:
+    "{{ cluster_list.msg }}"
+  when: item['name'] == cluster or
+        item['management_ip'] == cluster
+  #no_log: true

@@ -1,0 +1,22 @@
+---
+- netapp.um_info.na_um_list_aggregates:
+    hostname: "{{ aiqum_ip }}"
+    username: "{{ aiqum_username }}"
+    password: "{{ aiqum_password }}"
+    validate_certs: false
+  register: aggr_list
+- set_fact:
+    aggr_name: "{{ item.name }}"
+  with_items:
+    "{{ aggr_list.msg }}"
+  when:
+    - item.cluster.uuid == cluster_id
+    - "{{ item.space.block_storage.available | int / 1024 / 1024 / 1024 }} > {{ size }}"
+    - aggr_name is not defined
+  #no_log: true
+- set_stats:
+    data:
+      aggr_name: "{{ aggr_name }}"
+- debug:
+    msg: "No aggregate matches"
+  when: aggr_name is not defined

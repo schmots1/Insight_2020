@@ -1,0 +1,20 @@
+---
+- hosts: localhost
+  gather_facts: false
+  vars:
+    state: present
+  tasks:
+  - name: Setup rules
+    na_ontap_export_policy_rule:
+      state: "{{ state }}"
+      policy_name: "{{ volname }}"
+      vserver: "{{ vserver }}"
+      client_match: "{{ client_match }}"
+      ro_rule: "{{ ro_rule }}"
+      rw_rule: "{{ rw_rule }}"
+      super_user_security: "{{ su_rule }}"
+      hostname: "{{ cluster_mgmt_lif }}"
+      username: "{{ netapp_username }}"
+      password: "{{ netapp_password }}"
+      https: true
+      validate_certs: false

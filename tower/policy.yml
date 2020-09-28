@@ -1,0 +1,16 @@
+---
+- hosts: localhost
+  gather_facts: false
+  vars:
+    state: present
+  tasks:
+  - name: Create Policy
+    na_ontap_export_policy:
+      state: "{{ state }}"
+      name: "{{ volname }}"
+      vserver: "{{ vserver }}"
+      hostname: "{{ cluster_mgmt_lif }}"
+      username: "{{ netapp_username }}"
+      password: "{{ netapp_password }}"
+      https: true
+      validate_certs: false
