@@ -2,7 +2,7 @@
 #### Phase one variable section ####
 ####################################
 cluster: ansible_lab
-dhcp_mgmt: 172.32.0.115
+dhcp_mgmt: 172.31.199.119
 netapp_username: admin
 netapp_password: netapp123
 license_codes: YVUCRRRRYVHXCFABGAAAAAAAAAAA,SOHOURRRYVHXCFABGAAAAAAAAAAA,KQSRRRRRYVHXCFABGAAAAAAAAAAA,MBXNQRRRYVHXCFABGAAAAAAAAAAA,QDDSVRRRYVHXCFABGAAAAAAAAAAA,GUJZTRRRYVHXCFABGAAAAAAAAAAA,UZLKTRRRYVHXCFABGAAAAAAAAAAA,EJFDVRRRYVHXCFABGAAAAAAAAAAA,MHEYKUNFXMSMUCEZFAAAAAAAAAAA,GARJOUNFXMSMUCEZFAAAAAAAAAAA,YBCNLUNFXMSMUCEZFAAAAAAAAAAA,ANGJKUNFXMSMUCEZFAAAAAAAAAAA,EPMNPUNFXMSMUCEZFAAAAAAAAAAA,UFTUNUNFXMSMUCEZFAAAAAAAAAAA,ILVFNUNFXMSMUCEZFAAAAAAAAAAA,SUOYOUNFXMSMUCEZFAAAAAAAAAAA
@@ -10,7 +10,7 @@ disks: 28 #including three disks in aggr0
 node_joins:
 - 169.254.92.159
 mgmt_lif:  
-  ip: 172.32.0.151
+  ip: 172.31.199.151
   subnet: 255.255.255.0
   home_node: "{{ cluster }}-01"
   home_port: e0c
@@ -24,13 +24,13 @@ aggr:
 #### Phase two variable section ####
 ####################################
 gateway: 
-  ip: 172.32.0.1
+  ip: 172.31.199.1
   destination: 0.0.0.0/0
 ntp: 
   server: time.nist.gov
   version: auto
 dns:
-- nameserver: 172.32.0.1
+- nameserver: 172.31.199.1
   domain: ansible.lab
 snmp:
 - community_name: public
@@ -64,7 +64,7 @@ vlans:
 #  node: "{{ cluster }}-02"
 #  parent:  a0a
 sm_lif:
-- ip_base: 172.32.0.155
+- ip_base: 172.31.199.155
   subnet: 255.255.255.0 
   port: e0c
 
@@ -81,15 +81,15 @@ vservers:
     force: true
   vsadmin: true
   lifs:
-  - ip: 172.32.0.153
+  - ip: 172.31.199.153
     subnet: 255.255.255.0
     node: "{{ cluster }}-02"
     port: e0c
   gateway: 
-    ip: 172.32.0.1
+    ip: 172.31.199.1
     destination: 0.0.0.0/0
   dns:
-    nameserver: 172.32.0.40
+    nameserver: 172.31.199.40
     domain: ansible.lab  
 
 #####################################
@@ -108,7 +108,23 @@ exports:
   size: 10
   aggr: "{{ cluster }}_01_aggr1"
   clients:
-  - match: 172.32.0.60
+  - match: 172.31.199.60
     ro: sys
     rw: sys
     su: sys
+- name: share02
+  vserver: ansible_vserver
+  protocol: cifs
+  igroup:
+  os_type:
+  igroup_type:
+  initiator:
+  - iqn_wwpn:
+  share: share
+  size: 10
+  aggr: "{{ cluster }}_01_aggr1"
+  clients:
+  - match: 0.0.0.0/0
+    ro: any
+    rw: any
+    su: any
