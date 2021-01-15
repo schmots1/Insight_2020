@@ -2,15 +2,15 @@
 #### Phase one variable section ####
 ####################################
 cluster: ansible_lab
-dhcp_mgmt: 172.31.199.119
+dhcp_mgmt: 192.168.12.128
 netapp_username: admin
 netapp_password: netapp123
 license_codes: YVUCRRRRYVHXCFABGAAAAAAAAAAA,SOHOURRRYVHXCFABGAAAAAAAAAAA,KQSRRRRRYVHXCFABGAAAAAAAAAAA,MBXNQRRRYVHXCFABGAAAAAAAAAAA,QDDSVRRRYVHXCFABGAAAAAAAAAAA,GUJZTRRRYVHXCFABGAAAAAAAAAAA,UZLKTRRRYVHXCFABGAAAAAAAAAAA,EJFDVRRRYVHXCFABGAAAAAAAAAAA,MHEYKUNFXMSMUCEZFAAAAAAAAAAA,GARJOUNFXMSMUCEZFAAAAAAAAAAA,YBCNLUNFXMSMUCEZFAAAAAAAAAAA,ANGJKUNFXMSMUCEZFAAAAAAAAAAA,EPMNPUNFXMSMUCEZFAAAAAAAAAAA,UFTUNUNFXMSMUCEZFAAAAAAAAAAA,ILVFNUNFXMSMUCEZFAAAAAAAAAAA,SUOYOUNFXMSMUCEZFAAAAAAAAAAA
 disks: 28 #including three disks in aggr0
 node_joins:
-- 169.254.92.159
+- 169.254.15.19
 mgmt_lif:  
-  ip: 172.31.199.151
+  ip: 192.168.12.50
   subnet: 255.255.255.0
   home_node: "{{ cluster }}-01"
   home_port: e0c
@@ -24,14 +24,14 @@ aggr:
 #### Phase two variable section ####
 ####################################
 gateway: 
-  ip: 172.31.199.1
+  ip: 192.168.12.2
   destination: 0.0.0.0/0
 ntp: 
   server: time.nist.gov
   version: auto
 dns:
-- nameserver: 172.31.199.1
-  domain: ansible.lab
+- nameserver: 192.168.12.10
+  domain: lab.local
 snmp:
 - community_name: public
   access_control: ro
@@ -64,7 +64,7 @@ vlans:
 #  node: "{{ cluster }}-02"
 #  parent:  a0a
 sm_lif:
-- ip_base: 172.31.199.155
+- ip_base: 192.168.12.55
   subnet: 255.255.255.0 
   port: e0c
 
@@ -72,7 +72,7 @@ sm_lif:
 #### Phase three variable section ####
 ######################################
 ad_username: administrator
-ad_password: Netapp12
+ad_password: Netapp1!
 vservers:
 - name: ansible_vserver
   protocol: nfs,cifs
@@ -81,15 +81,15 @@ vservers:
     force: true
   vsadmin: true
   lifs:
-  - ip: 172.31.199.153
+  - ip: 192.168.12.53
     subnet: 255.255.255.0
     node: "{{ cluster }}-02"
     port: e0c
   gateway: 
-    ip: 172.31.199.1
+    ip: 192.168.12.2
     destination: 0.0.0.0/0
   dns:
-    nameserver: 172.31.199.40
+    nameserver: 192.168.12.10
     domain: ansible.lab  
 
 #####################################

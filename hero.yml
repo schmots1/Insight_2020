@@ -41,7 +41,7 @@
       command: "reboot -node {{ item }} -ignore-quorum-warnings"
       hostname: "{{ dhcp_mgmt }}"
       <<: *login
-    with_items: "{{ netapp.ontap_info.cluster_node_info }}"
+    with_items: "{{ netapp.ontap_info.cluster_node_info|dictsort|reverse }}"
     tags: cluster, reboot
   - name: wait for reboot to finish
     wait_for:
@@ -272,6 +272,7 @@
       #aggr_list: "{{ '*' if item.aggr_list is not defined else item.aggr_list }}" #Useful for setting an aggregate list if an application requires it.
       hostname: "{{ mgmt_lif.ip }}"
       <<: *login
+      allowed_protocols: "{{ item.protocol }}"
     loop: "{{ vservers }}"
     when: vservers != None
     tags: vserver
